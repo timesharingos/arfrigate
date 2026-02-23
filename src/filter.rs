@@ -10,10 +10,7 @@ impl IgnoreFilter {
     }
     pub fn new_str(dir_list: Vec<String>) -> Self {
         Self {
-            dir_list: dir_list
-                .iter()
-                .map(move |path| PathBuf::from(path))
-                .collect(),
+            dir_list: dir_list.iter().map(PathBuf::from).collect(),
         }
     }
 
