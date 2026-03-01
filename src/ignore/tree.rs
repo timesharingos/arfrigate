@@ -212,7 +212,6 @@ impl IgnoreTreeNode {
     where
         P: AsRef<str>,
     {
-        //TODO
         if target.as_ref() == "" {
             return;
         }
@@ -408,5 +407,21 @@ mod tests {
         assert!(!pattern.match_pattern("abcd"));
         let pattern: IgnoreMatchPattern = "a*c".into();
         assert!(pattern.match_pattern("abc"));
+    }
+
+    #[test]
+    fn test_basic_tree() {
+        let mut tree_pattern: IgnoreTreeNode = "test/**/*.jpg".into();
+        assert!(!tree_pattern.match_pattern("test"));
+        assert!(tree_pattern.match_pattern("test/1.jpg"));
+        assert!(tree_pattern.match_pattern("test/abc/32.jpg"));
+        assert!(!tree_pattern.match_pattern("testds"));
+        tree_pattern.add_path("!test/**/*.png");
+        assert!(!tree_pattern.match_pattern("test/abc.png"));
+        assert!(!tree_pattern.match_pattern("test/fsds/abfds.png"));
+        tree_pattern.add_path("!test/test*");
+        assert!(tree_pattern.match_pattern("test/tewews/fsdfsdd3.jpg"));
+        assert!(!tree_pattern.match_pattern("test/testa"));
+        assert!(tree_pattern.match_pattern("test/test/fdsdds.jpg"));
     }
 }
