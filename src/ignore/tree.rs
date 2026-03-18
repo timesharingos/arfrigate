@@ -1,4 +1,4 @@
-use std::convert::AsRef;
+use std::{convert::AsRef, fmt::Debug};
 
 pub enum IgnoreMatchPatternType {
     Wildcard,
@@ -369,6 +369,123 @@ impl IgnoreTreeNode {
     }
 }
 
+#[derive(Debug)]
+pub enum IgnoreTreeMatchHint {
+    NoneMatch,
+    WhiteOnly,
+    BlackOnly,
+    Sub,
+}
+
+impl IgnoreTreeNode {
+    pub fn match_hint<P>(&self, target: P) -> IgnoreTreeMatchHint
+    where
+        P: AsRef<str>,
+    {
+        let components = target.as_ref().split_once("/");
+        match components {
+            Some((prefix, suffix)) => {
+                // forward to the child
+                let white_result = self
+                    .ruleset
+                    .iter()
+                    .filter(|rule| rule.0.match_pattern(prefix))
+                    .map(|rule| {
+                        if rule.1.is_none() {
+                            IgnoreTreeMatchHint::NoneMatch
+                        } else {
+                            rule.1.as_ref().unwrap().match_hint(suffix)
+                        }
+                    })
+                    .reduce(|cur, result| match cur {
+                        IgnoreTreeMatchHint::NoneMatch => result,
+                        IgnoreTreeMatchHint::Sub => cur,
+                        _ => match result {
+                            IgnoreTreeMatchHint::NoneMatch => cur,
+                            _ => result,
+                        },
+                    });
+                let black_result = self
+                    .exclude
+                    .iter()
+                    .filter(|rule| rule.0.match_pattern(prefix))
+                    .map(|rule| {
+                        if rule.1.is_none() {
+                            IgnoreTreeMatchHint::NoneMatch
+                        } else {
+                            match rule.1.as_ref().unwrap().match_hint(suffix) {
+                                IgnoreTreeMatchHint::WhiteOnly => IgnoreTreeMatchHint::BlackOnly,
+                                other => other,
+                            }
+                        }
+                    })
+                    .reduce(|cur, result| match cur {
+                        IgnoreTreeMatchHint::NoneMatch => result,
+                        IgnoreTreeMatchHint::Sub => cur,
+                        _ => match result {
+                            IgnoreTreeMatchHint::NoneMatch => cur,
+                            _ => result,
+                        },
+                    });
+                if white_result.is_none() && black_result.is_none() {
+                    IgnoreTreeMatchHint::NoneMatch
+                } else if white_result.is_none() {
+                    black_result.unwrap()
+                } else if black_result.is_none() {
+                    white_result.unwrap()
+                } else {
+                    let white_actual = white_result.unwrap();
+                    let black_actual = black_result.unwrap();
+                    match white_actual {
+                        IgnoreTreeMatchHint::NoneMatch => black_actual,
+                        IgnoreTreeMatchHint::Sub => IgnoreTreeMatchHint::Sub,
+                        IgnoreTreeMatchHint::WhiteOnly => match black_actual {
+                            IgnoreTreeMatchHint::Sub => IgnoreTreeMatchHint::Sub,
+                            _ => IgnoreTreeMatchHint::WhiteOnly,
+                        },
+                        _ => unreachable!("The ruleset cannot generate the BlackOnly hint"),
+                    }
+                }
+            }
+            None => {
+                let white_result = self.ruleset.iter().fold(None, |cur, rule| {
+                    if cur.is_some() && cur.clone().unwrap() {
+                        return cur;
+                    }
+                    if !rule.0.match_pattern(target.as_ref()) {
+                        cur
+                    } else if rule.1.is_none() {
+                        if cur.is_none() { Some(false) } else { cur }
+                    } else {
+                        Some(true)
+                    }
+                });
+                let black_result = self.exclude.iter().fold(None, |cur, rule| {
+                    if cur.is_some() && cur.clone().unwrap() {
+                        return cur;
+                    }
+                    if !rule.0.match_pattern(target.as_ref()) {
+                        cur
+                    } else if rule.1.is_none() {
+                        if cur.is_none() { Some(false) } else { cur }
+                    } else {
+                        Some(true)
+                    }
+                });
+                if white_result.is_none() && black_result.is_none() {
+                    IgnoreTreeMatchHint::NoneMatch
+                } else if white_result.is_none() && !black_result.unwrap() {
+                    IgnoreTreeMatchHint::BlackOnly
+                } else if black_result.is_none() && !white_result.unwrap() {
+                    IgnoreTreeMatchHint::WhiteOnly
+                } else {
+                    IgnoreTreeMatchHint::Sub
+                }
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -423,5 +540,52 @@ mod tests {
         assert!(tree_pattern.match_pattern("test/tewews/fsdfsdd3.jpg"));
         assert!(!tree_pattern.match_pattern("test/testa"));
         assert!(tree_pattern.match_pattern("test/test/fdsdds.jpg"));
+    }
+
+    #[test]
+    fn test_match_hint() {
+        let mut tree_pattern = IgnoreTreeNode::default();
+        tree_pattern.add_path("test");
+        tree_pattern.add_path("test/fded");
+        tree_pattern.add_path("test/fded/**");
+        tree_pattern.add_path("test/fdgr");
+        tree_pattern.add_path("test/black");
+        tree_pattern.add_path("!test/black/fdssds");
+        assert!(matches!(
+            tree_pattern.match_hint("test/er34r"),
+            IgnoreTreeMatchHint::NoneMatch
+        ));
+        assert!(matches!(
+            tree_pattern.match_hint("test"),
+            IgnoreTreeMatchHint::Sub
+        ));
+        assert!(matches!(
+            tree_pattern.match_hint("test/fded"),
+            IgnoreTreeMatchHint::Sub
+        ));
+        assert!(matches!(
+            tree_pattern.match_hint("test"),
+            IgnoreTreeMatchHint::Sub
+        ));
+        assert!(matches!(
+            tree_pattern.match_hint("test/fdgr"),
+            IgnoreTreeMatchHint::WhiteOnly
+        ));
+        assert!(matches!(
+            tree_pattern.match_hint("test/black"),
+            IgnoreTreeMatchHint::Sub
+        ));
+        assert!(matches!(
+            tree_pattern.match_hint("test/black/fdfdfd"),
+            IgnoreTreeMatchHint::NoneMatch
+        ));
+        assert!(matches!(
+            tree_pattern.match_hint("test/fded/fdfdd"),
+            IgnoreTreeMatchHint::WhiteOnly
+        ));
+        assert!(matches!(
+            tree_pattern.match_hint("test/black/fdssds"),
+            IgnoreTreeMatchHint::BlackOnly
+        ));
     }
 }
