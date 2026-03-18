@@ -391,10 +391,10 @@ impl IgnoreTreeNode {
                     .iter()
                     .filter(|rule| rule.0.match_pattern(prefix))
                     .map(|rule| {
-                        if rule.1.is_none() {
-                            IgnoreTreeMatchHint::NoneMatch
+                        if let Some(childrule) = &rule.1 {
+                            childrule.match_hint(suffix)
                         } else {
-                            rule.1.as_ref().unwrap().match_hint(suffix)
+                            IgnoreTreeMatchHint::NoneMatch
                         }
                     })
                     .reduce(|cur, result| match cur {
@@ -410,13 +410,14 @@ impl IgnoreTreeNode {
                     .iter()
                     .filter(|rule| rule.0.match_pattern(prefix))
                     .map(|rule| {
-                        if rule.1.is_none() {
-                            IgnoreTreeMatchHint::NoneMatch
-                        } else {
-                            match rule.1.as_ref().unwrap().match_hint(suffix) {
+                        if let Some(childrule) = &rule.1 {
+                            match childrule.match_hint(suffix) {
                                 IgnoreTreeMatchHint::WhiteOnly => IgnoreTreeMatchHint::BlackOnly,
+                                IgnoreTreeMatchHint::BlackOnly => IgnoreTreeMatchHint::WhiteOnly,
                                 other => other,
                             }
+                        } else {
+                            IgnoreTreeMatchHint::NoneMatch
                         }
                     })
                     .reduce(|cur, result| match cur {
@@ -427,29 +428,28 @@ impl IgnoreTreeNode {
                             _ => result,
                         },
                     });
-                if white_result.is_none() && black_result.is_none() {
-                    IgnoreTreeMatchHint::NoneMatch
-                } else if white_result.is_none() {
-                    black_result.unwrap()
-                } else if black_result.is_none() {
-                    white_result.unwrap()
-                } else {
-                    let white_actual = white_result.unwrap();
-                    let black_actual = black_result.unwrap();
-                    match white_actual {
-                        IgnoreTreeMatchHint::NoneMatch => black_actual,
-                        IgnoreTreeMatchHint::Sub => IgnoreTreeMatchHint::Sub,
-                        IgnoreTreeMatchHint::WhiteOnly => match black_actual {
+                match white_result {
+                    None => match black_result {
+                        None => IgnoreTreeMatchHint::NoneMatch,
+                        Some(black_actual) => black_actual,
+                    },
+                    Some(white_actual) => match black_result {
+                        None => white_actual,
+                        Some(black_actual) => match white_actual {
+                            IgnoreTreeMatchHint::NoneMatch => black_actual,
                             IgnoreTreeMatchHint::Sub => IgnoreTreeMatchHint::Sub,
-                            _ => IgnoreTreeMatchHint::WhiteOnly,
+                            IgnoreTreeMatchHint::WhiteOnly => match black_actual {
+                                IgnoreTreeMatchHint::Sub => IgnoreTreeMatchHint::Sub,
+                                _ => IgnoreTreeMatchHint::WhiteOnly,
+                            },
+                            _ => unreachable!("The ruleset cannot generate the BlackOnly hint"),
                         },
-                        _ => unreachable!("The ruleset cannot generate the BlackOnly hint"),
-                    }
+                    },
                 }
             }
             None => {
                 let white_result = self.ruleset.iter().fold(None, |cur, rule| {
-                    if cur.is_some() && cur.clone().unwrap() {
+                    if cur.is_some() && cur.unwrap() {
                         return cur;
                     }
                     if !rule.0.match_pattern(target.as_ref()) {
@@ -461,7 +461,7 @@ impl IgnoreTreeNode {
                     }
                 });
                 let black_result = self.exclude.iter().fold(None, |cur, rule| {
-                    if cur.is_some() && cur.clone().unwrap() {
+                    if cur.is_some() && cur.unwrap() {
                         return cur;
                     }
                     if !rule.0.match_pattern(target.as_ref()) {
