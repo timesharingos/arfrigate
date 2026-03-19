@@ -154,6 +154,9 @@ mod tests {
         File::create(root.join("debug.log")).unwrap();
 
         let filter = RepoFilter::new(root).expect("should create filter");
+
+        println!("{:?}", filter.filelist());
+
         assert!(
             filter
                 .filelist()
