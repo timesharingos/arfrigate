@@ -1,4 +1,9 @@
-use std::{convert::AsRef, fmt::Debug};
+use std::{
+    convert::AsRef,
+    fs::File,
+    io::{BufRead, BufReader},
+    path::Path,
+};
 
 pub enum IgnoreMatchPatternType {
     Wildcard,
@@ -366,6 +371,28 @@ impl IgnoreTreeNode {
                 })
             }
         }
+    }
+}
+
+impl IgnoreTreeNode {
+    pub fn from_path<P>(filepath: P) -> std::io::Result<Self>
+    where
+        P: AsRef<Path>,
+    {
+        let file = File::open(filepath)?;
+        let mut tree_node = Self::new();
+        for line in BufReader::new(file).lines() {
+            let content = line?;
+            let content = content.trim();
+            if content.is_empty()
+                || (content.starts_with("#") && content.starts_with("#ARFRIGATE:"))
+            {
+                continue;
+            }
+            let content = content.replace("#ARFRIGATE", "");
+            tree_node.add_path(content.trim());
+        }
+        Ok(tree_node)
     }
 }
 
