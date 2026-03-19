@@ -148,6 +148,12 @@ mod tests {
         writeln!(file, "target").unwrap();
         writeln!(file, "*.log").unwrap();
 
+        let tree = IgnoreTreeNode::from_path(&gitignore_path).unwrap();
+        assert!(matches!(
+            tree.match_hint("debug.log"),
+            tree::IgnoreTreeMatchHint::WhiteOnly
+        ));
+
         fs::create_dir(root.join("src")).unwrap();
         File::create(root.join("src").join("main.rs")).unwrap();
         File::create(root.join("Cargo.toml")).unwrap();

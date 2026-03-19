@@ -389,7 +389,6 @@ impl IgnoreTreeNode {
             {
                 continue;
             }
-            println!("content:{}", content);
             let content = content.replace("#ARFRIGATE", "");
             tree_node.add_path(content.trim());
         }
