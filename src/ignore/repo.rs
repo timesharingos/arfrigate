@@ -47,7 +47,7 @@ impl RepoFilter {
             match entry {
                 Err(_) => continue,
                 Ok(entry) => {
-                    let entry = target.as_ref().join(entry.path());
+                    let entry = target.as_ref().join(entry.file_name());
                     if entry.is_file() {
                         result.push(
                             entry
@@ -58,7 +58,12 @@ impl RepoFilter {
                         );
                     } else {
                         result.append(
-                            &mut Self::filter(target.as_ref().join(entry)).unwrap_or(vec![]),
+                            &mut Self::filter(
+                                target
+                                    .as_ref()
+                                    .join(entry.file_name().expect("unexpected relative path")),
+                            )
+                            .unwrap_or(vec![]),
                         );
                     }
                 }
@@ -95,7 +100,9 @@ impl RepoFilter {
             match entry {
                 Err(_) => continue,
                 Ok(entry) => {
-                    let entry = target.as_ref().join(entry.path());
+                    let entry = target
+                        .as_ref()
+                        .join(entry.path().file_name().expect("unexpected relative path"));
                     let match_hint =
                         ignore.match_hint(entry.as_os_str().to_str().expect("illegal UTF-8 code"));
                     println!("{:?}/{:?}", entry, match_hint);
