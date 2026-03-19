@@ -145,16 +145,15 @@ mod tests {
 
         let gitignore_path = root.join(".gitignore");
         let mut file = File::create(&gitignore_path).unwrap();
-        writeln!(file, "target/").unwrap();
+        writeln!(file, "target").unwrap();
         writeln!(file, "*.log").unwrap();
 
         fs::create_dir(root.join("src")).unwrap();
-        File::create(root.join("src/main.rs")).unwrap();
+        File::create(root.join("src").join("main.rs")).unwrap();
         File::create(root.join("Cargo.toml")).unwrap();
         File::create(root.join("debug.log")).unwrap();
 
         let filter = RepoFilter::new(root).expect("should create filter");
-        println!("{:?}", filter.filelist());
         assert!(
             filter
                 .filelist()
