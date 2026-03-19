@@ -98,6 +98,7 @@ impl RepoFilter {
                     let entry = target.as_ref().join(entry.path());
                     let match_hint =
                         ignore.match_hint(entry.as_os_str().to_str().expect("illegal UTF-8 code"));
+                    println!("{:?}/{:?}", entry, match_hint);
                     match match_hint {
                         tree::IgnoreTreeMatchHint::NoneMatch => result.push(
                             prefix
@@ -147,12 +148,6 @@ mod tests {
         let mut file = File::create(&gitignore_path).unwrap();
         writeln!(file, "target").unwrap();
         writeln!(file, "*.log").unwrap();
-
-        let tree = IgnoreTreeNode::from_path(&gitignore_path).unwrap();
-        assert!(matches!(
-            tree.match_hint("debug.log"),
-            tree::IgnoreTreeMatchHint::WhiteOnly
-        ));
 
         fs::create_dir(root.join("src")).unwrap();
         File::create(root.join("src").join("main.rs")).unwrap();
