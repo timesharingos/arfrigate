@@ -8,6 +8,7 @@ pub struct RepoFilter {
 }
 
 impl RepoFilter {
+    #[allow(dead_code)]
     pub fn root(&self) -> &str {
         &self.root
     }
@@ -135,6 +136,47 @@ impl RepoFilter {
             }
         }
         result
+    }
+}
+
+#[derive(Default)]
+pub struct FilterList {
+    origin_list: Vec<String>,
+    actual_list: Vec<String>,
+}
+
+impl FilterList {
+    pub fn new(origin_list: Vec<String>) -> Self {
+        let actual_list = Self::filter_dirs(&origin_list);
+        Self {
+            origin_list,
+            actual_list,
+        }
+    }
+
+    fn filter_dirs(target_dirs: &[String]) -> Vec<String> {
+        target_dirs
+            .iter()
+            .map(RepoFilter::new)
+            .filter(|actual| actual.is_some())
+            .map(|actual| actual.unwrap().filelist().to_owned())
+            .flat_map(|actual| actual.into_iter())
+            .collect()
+    }
+
+    #[allow(dead_code)]
+    pub fn add_origin(&mut self, target: String) {
+        let mut new_actual = Self::filter_dirs(std::slice::from_ref(&target));
+        self.actual_list.append(&mut new_actual);
+        self.origin_list.push(target);
+    }
+
+    #[allow(dead_code)]
+    pub fn get_origin(&self) -> &Vec<String> {
+        &self.origin_list
+    }
+    pub fn get_actual(&self) -> &Vec<String> {
+        &self.actual_list
     }
 }
 

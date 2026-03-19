@@ -294,6 +294,7 @@ impl IgnoreTreeNode {
         }
     }
 
+    #[allow(dead_code)]
     pub fn match_pattern<P>(&self, target: P) -> bool
     where
         P: AsRef<str>,
