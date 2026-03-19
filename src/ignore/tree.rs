@@ -396,7 +396,6 @@ impl IgnoreTreeNode {
     }
 }
 
-#[derive(Debug)]
 pub enum IgnoreTreeMatchHint {
     NoneMatch,
     WhiteOnly,
