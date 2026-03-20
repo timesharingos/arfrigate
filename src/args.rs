@@ -1,7 +1,7 @@
 use clap::{Parser, Subcommand};
 
 #[derive(PartialEq, Eq, Parser)]
-#[command(version = "0.1.2", about = "filter directories by gitignore")]
+#[command(version = "0.1.3", about = "filter directories by gitignore")]
 #[command(propagate_version = true)]
 pub struct Cli {
     #[command(subcommand)]

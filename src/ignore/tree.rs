@@ -5,16 +5,11 @@ use std::{
     path::Path,
 };
 
-#[derive(Debug)]
-pub enum IgnoreMatchPatternType {
-    Wildcard,
-    Strict(String),
-}
+use regex::Regex;
 
-#[derive(Debug)]
 pub struct IgnoreMatchPattern {
     original_pattern: String,
-    pattern_part: Vec<IgnoreMatchPatternType>,
+    regex: Regex,
 }
 
 impl From<String> for IgnoreMatchPattern {
@@ -25,35 +20,11 @@ impl From<String> for IgnoreMatchPattern {
 }
 impl From<&str> for IgnoreMatchPattern {
     fn from(value: &str) -> Self {
-        if value.is_empty() {
-            return Self {
-                original_pattern: value.to_string(),
-                pattern_part: vec![],
-            };
-        }
-        if value == "*" {
-            return Self {
-                original_pattern: value.to_string(),
-                pattern_part: vec![IgnoreMatchPatternType::Wildcard],
-            };
-        }
-        let mut pattern_part: Vec<IgnoreMatchPatternType> = value
-            .split("*")
-            .flat_map(|x| {
-                vec![
-                    IgnoreMatchPatternType::Strict(x.to_string()),
-                    IgnoreMatchPatternType::Wildcard,
-                ]
-            })
-            .filter(|x| match x {
-                IgnoreMatchPatternType::Strict(part) => !part.is_empty(),
-                IgnoreMatchPatternType::Wildcard => true,
-            })
-            .collect();
-        pattern_part.remove(pattern_part.len() - 1);
+        let regex_str = format!("^{}$", regex::escape(value).replace("\\*", ".*"));
+        let regex = Regex::new(&regex_str).unwrap();
         Self {
-            pattern_part,
             original_pattern: value.to_string(),
+            regex,
         }
     }
 }
@@ -68,61 +39,20 @@ impl IgnoreMatchPattern {
     pub fn new(pattern_part: String) -> Self {
         pattern_part.into()
     }
-    pub fn get_pattern(&self) -> &Vec<IgnoreMatchPatternType> {
-        &self.pattern_part
+    pub fn get_pattern(&self) -> &Regex {
+        &self.regex
     }
     pub fn match_pattern<P>(&self, target: P) -> bool
     where
         P: AsRef<str>,
     {
-        if self.pattern_part.is_empty() {
-            return target.as_ref().is_empty();
-        }
-        let mut match_index = 0_usize;
-        let mut wildcard_mode = false;
-        for pattern_type in &self.pattern_part {
-            match pattern_type {
-                IgnoreMatchPatternType::Wildcard => {
-                    wildcard_mode = true;
-                }
-                IgnoreMatchPatternType::Strict(part) => {
-                    if wildcard_mode {
-                        //try to find the next literal value
-                        let pending_index = &target.as_ref()[match_index..].find(part);
-                        if pending_index.is_none() {
-                            return false;
-                        }
-                        match_index = match_index + pending_index.unwrap() + part.len();
-                        wildcard_mode = false;
-                    } else {
-                        //compare the literal value
-                        let pattern_len = part.len();
-                        if match_index + pattern_len > target.as_ref().len() {
-                            return false;
-                        }
-                        let target_part =
-                            &target.as_ref()[match_index..(match_index + pattern_len)];
-                        if target_part != part {
-                            return false;
-                        } else {
-                            match_index += pattern_len;
-                        }
-                    }
-                }
-            }
-        }
-        if wildcard_mode {
-            true
-        } else {
-            match_index == target.as_ref().len()
-        }
+        self.regex.is_match(target.as_ref())
     }
     pub fn get_original_pattern(&self) -> &str {
         &self.original_pattern
     }
 }
 
-#[derive(Debug)]
 pub enum IgnoreTreePattern {
     WildCardAll,
     Regular(IgnoreMatchPattern),
@@ -141,7 +71,6 @@ impl IgnoreTreePattern {
     }
 }
 
-#[derive(Debug)]
 pub struct IgnoreTreeNode {
     ruleset: Vec<(IgnoreTreePattern, Option<IgnoreTreeNode>)>,
     exclude: Vec<(IgnoreTreePattern, Option<IgnoreTreeNode>)>,
@@ -395,7 +324,7 @@ impl IgnoreTreeNode {
                 continue;
             }
             let content = content.replace("#ARFRIGATE", "");
-            tree_node.add_path(content.trim().trim_end_matches("/"));
+            tree_node.add_path(content.trim().trim_start_matches("/").trim_end_matches("/"));
         }
         Ok(tree_node)
     }
@@ -591,7 +520,6 @@ mod tests {
     #[test]
     fn test_pattern_matching() {
         let pattern: IgnoreMatchPattern = String::from("*abc*df*").into();
-        assert_eq!(pattern.get_pattern().len(), 5);
         assert!(pattern.match_pattern("2342abcaasdfffss"));
         assert!(pattern.match_pattern("abcdf"));
         assert!(pattern.match_pattern("ddaaeeabcdf3d2"));
@@ -602,12 +530,10 @@ mod tests {
     #[test]
     fn test_special_matching() {
         let pattern: IgnoreMatchPattern = String::from("*").into();
-        assert_eq!(pattern.get_pattern().len(), 1);
         assert!(pattern.match_pattern(""));
         assert!(pattern.match_pattern("*"));
         assert!(pattern.match_pattern("abcdf"));
         let pattern: IgnoreMatchPattern = String::from("").into();
-        assert_eq!(pattern.get_pattern().len(), 0);
         assert!(pattern.match_pattern(""));
         assert!(!pattern.match_pattern("*"));
     }
