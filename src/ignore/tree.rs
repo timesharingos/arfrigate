@@ -556,6 +556,8 @@ impl IgnoreTreeNode {
                             }
                         }
                     });
+
+                #[allow(clippy::unnecessary_unwrap)]
                 if white_result.is_none() && black_result.is_none() {
                     IgnoreTreeMatchHint::NoneMatch
                 } else if white_result.is_none() {
