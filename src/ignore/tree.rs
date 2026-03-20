@@ -386,12 +386,12 @@ impl IgnoreTreeNode {
             let content = line?;
             let content = content.trim();
             if content.is_empty()
-                || (content.starts_with("#") && content.starts_with("#ARFRIGATE:"))
+                || (content.starts_with("#") && !content.starts_with("#ARFRIGATE:"))
             {
                 continue;
             }
             let content = content.replace("#ARFRIGATE", "");
-            tree_node.add_path(content.trim());
+            tree_node.add_path(content.trim().trim_end_matches("/"));
         }
         Ok(tree_node)
     }
