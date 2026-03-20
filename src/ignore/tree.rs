@@ -5,11 +5,13 @@ use std::{
     path::Path,
 };
 
+#[derive(Debug)]
 pub enum IgnoreMatchPatternType {
     Wildcard,
     Strict(String),
 }
 
+#[derive(Debug)]
 pub struct IgnoreMatchPattern {
     original_pattern: String,
     pattern_part: Vec<IgnoreMatchPatternType>,
@@ -120,6 +122,7 @@ impl IgnoreMatchPattern {
     }
 }
 
+#[derive(Debug)]
 pub enum IgnoreTreePattern {
     WildCardAll,
     Regular(IgnoreMatchPattern),
@@ -138,6 +141,7 @@ impl IgnoreTreePattern {
     }
 }
 
+#[derive(Debug)]
 pub struct IgnoreTreeNode {
     ruleset: Vec<(IgnoreTreePattern, Option<IgnoreTreeNode>)>,
     exclude: Vec<(IgnoreTreePattern, Option<IgnoreTreeNode>)>,
@@ -304,7 +308,7 @@ impl IgnoreTreeNode {
             Some((prefix, suffix)) => {
                 // multi level
                 self.ruleset.iter().any(|rule| {
-                    (rule.1.is_none() && matches!(&rule.0, IgnoreTreePattern::WildCardAll))
+                    (rule.1.is_none() && rule.0.match_pattern(prefix))
                         || (rule.1.is_some()
                             && match &rule.0 {
                                 IgnoreTreePattern::Regular(regular) => {
@@ -326,7 +330,7 @@ impl IgnoreTreeNode {
                                 }
                             })
                 }) && self.exclude.iter().all(|black| {
-                    (black.1.is_none() && !matches!(&black.0, IgnoreTreePattern::WildCardAll))
+                    (black.1.is_none() && !black.0.match_pattern(prefix))
                         || (black.1.is_some()
                             && match &black.0 {
                                 IgnoreTreePattern::WildCardAll => {
@@ -353,13 +357,13 @@ impl IgnoreTreeNode {
                 // single level
                 self.ruleset.iter().any(|rule| {
                     (rule.1.is_none() && rule.0.match_pattern(target.as_ref()))
-                        || rule.1.is_some()
+                        || (rule.1.is_some()
                             && match &rule.0 {
                                 IgnoreTreePattern::WildCardAll => {
                                     rule.1.as_ref().unwrap().match_pattern(target.as_ref())
                                 }
                                 _ => false,
-                            }
+                            })
                 }) && self.exclude.iter().all(|black| {
                     (black.1.is_some()
                         && match &black.0 {
@@ -386,12 +390,12 @@ impl IgnoreTreeNode {
             let content = line?;
             let content = content.trim();
             if content.is_empty()
-                || (content.starts_with("#") && content.starts_with("#ARFRIGATE:"))
+                || (content.starts_with("#") && !content.starts_with("#ARFRIGATE:"))
             {
                 continue;
             }
             let content = content.replace("#ARFRIGATE", "");
-            tree_node.add_path(content.trim());
+            tree_node.add_path(content.trim().trim_end_matches("/"));
         }
         Ok(tree_node)
     }
@@ -402,6 +406,7 @@ pub enum IgnoreTreeMatchHint {
     WhiteOnly,
     BlackOnly,
     Sub,
+    WildcardAllMatch,
 }
 
 impl IgnoreTreeNode {
@@ -418,6 +423,12 @@ impl IgnoreTreeNode {
                     .iter()
                     .filter(|rule| rule.0.match_pattern(prefix))
                     .map(|rule| {
+                        if let IgnoreTreePattern::WildCardAll = rule.0 {
+                            return match &rule.1 {
+                                None => IgnoreTreeMatchHint::WhiteOnly,
+                                Some(_) => IgnoreTreeMatchHint::WildcardAllMatch,
+                            };
+                        }
                         if let Some(childrule) = &rule.1 {
                             childrule.match_hint(suffix)
                         } else {
@@ -427,6 +438,9 @@ impl IgnoreTreeNode {
                     .reduce(|cur, result| match cur {
                         IgnoreTreeMatchHint::NoneMatch => result,
                         IgnoreTreeMatchHint::Sub => cur,
+                        IgnoreTreeMatchHint::WildcardAllMatch => {
+                            IgnoreTreeMatchHint::WildcardAllMatch
+                        }
                         _ => match result {
                             IgnoreTreeMatchHint::NoneMatch => cur,
                             _ => result,
@@ -437,6 +451,12 @@ impl IgnoreTreeNode {
                     .iter()
                     .filter(|rule| rule.0.match_pattern(prefix))
                     .map(|rule| {
+                        if let IgnoreTreePattern::WildCardAll = rule.0 {
+                            return match &rule.1 {
+                                None => IgnoreTreeMatchHint::BlackOnly,
+                                Some(_) => IgnoreTreeMatchHint::WildcardAllMatch,
+                            };
+                        }
                         if let Some(childrule) = &rule.1 {
                             match childrule.match_hint(suffix) {
                                 IgnoreTreeMatchHint::WhiteOnly => IgnoreTreeMatchHint::BlackOnly,
@@ -465,8 +485,15 @@ impl IgnoreTreeNode {
                         Some(black_actual) => match white_actual {
                             IgnoreTreeMatchHint::NoneMatch => black_actual,
                             IgnoreTreeMatchHint::Sub => IgnoreTreeMatchHint::Sub,
+                            IgnoreTreeMatchHint::WildcardAllMatch => {
+                                IgnoreTreeMatchHint::WildcardAllMatch
+                            }
                             IgnoreTreeMatchHint::WhiteOnly => match black_actual {
                                 IgnoreTreeMatchHint::Sub => IgnoreTreeMatchHint::Sub,
+                                IgnoreTreeMatchHint::BlackOnly => IgnoreTreeMatchHint::Sub,
+                                IgnoreTreeMatchHint::WildcardAllMatch => {
+                                    IgnoreTreeMatchHint::WildcardAllMatch
+                                }
                                 _ => IgnoreTreeMatchHint::WhiteOnly,
                             },
                             _ => unreachable!("The ruleset cannot generate the BlackOnly hint"),
@@ -475,36 +502,80 @@ impl IgnoreTreeNode {
                 }
             }
             None => {
-                let white_result = self.ruleset.iter().fold(None, |cur, rule| {
-                    if cur.is_some() && cur.unwrap() {
-                        return cur;
-                    }
-                    if !rule.0.match_pattern(target.as_ref()) {
-                        cur
-                    } else if rule.1.is_none() {
-                        if cur.is_none() { Some(false) } else { cur }
-                    } else {
-                        Some(true)
-                    }
-                });
-                let black_result = self.exclude.iter().fold(None, |cur, rule| {
-                    if cur.is_some() && cur.unwrap() {
-                        return cur;
-                    }
-                    if !rule.0.match_pattern(target.as_ref()) {
-                        cur
-                    } else if rule.1.is_none() {
-                        if cur.is_none() { Some(false) } else { cur }
-                    } else {
-                        Some(true)
-                    }
-                });
+                let white_result: Option<Option<bool>> =
+                    self.ruleset.iter().fold(None, |cur, rule| {
+                        if cur.is_some() && cur.unwrap().is_some_and(|inside| inside) {
+                            return cur;
+                        }
+                        if !rule.0.match_pattern(target.as_ref()) {
+                            cur
+                        } else {
+                            match &rule.0 {
+                                IgnoreTreePattern::WildCardAll => match &rule.1 {
+                                    None => Some(Some(false)),
+                                    Some(_) => Some(None),
+                                },
+                                _ => {
+                                    if rule.1.is_none() {
+                                        if cur.is_none() {
+                                            Some(Some(false))
+                                        } else {
+                                            cur
+                                        }
+                                    } else {
+                                        Some(Some(true))
+                                    }
+                                }
+                            }
+                        }
+                    });
+                let black_result: Option<Option<bool>> =
+                    self.exclude.iter().fold(None, |cur, rule| {
+                        if cur.is_some() && cur.unwrap().is_some_and(|inside| inside) {
+                            return cur;
+                        }
+                        if !rule.0.match_pattern(target.as_ref()) {
+                            cur
+                        } else {
+                            match &rule.0 {
+                                IgnoreTreePattern::WildCardAll => match &rule.1 {
+                                    None => Some(Some(false)),
+                                    Some(_) => Some(None),
+                                },
+                                _ => {
+                                    if rule.1.is_none() {
+                                        if cur.is_none() {
+                                            Some(Some(false))
+                                        } else {
+                                            cur
+                                        }
+                                    } else {
+                                        Some(Some(true))
+                                    }
+                                }
+                            }
+                        }
+                    });
+
+                #[allow(clippy::unnecessary_unwrap)]
                 if white_result.is_none() && black_result.is_none() {
                     IgnoreTreeMatchHint::NoneMatch
-                } else if white_result.is_none() && !black_result.unwrap() {
-                    IgnoreTreeMatchHint::BlackOnly
-                } else if black_result.is_none() && !white_result.unwrap() {
-                    IgnoreTreeMatchHint::WhiteOnly
+                } else if white_result.is_none() {
+                    let black_result = black_result.unwrap();
+                    match black_result {
+                        None => IgnoreTreeMatchHint::WildcardAllMatch,
+                        Some(false) => IgnoreTreeMatchHint::BlackOnly,
+                        Some(true) => IgnoreTreeMatchHint::Sub,
+                    }
+                } else if black_result.is_none() {
+                    let white_result = white_result.unwrap();
+                    match white_result {
+                        None => IgnoreTreeMatchHint::WildcardAllMatch,
+                        Some(false) => IgnoreTreeMatchHint::WhiteOnly,
+                        Some(true) => IgnoreTreeMatchHint::Sub,
+                    }
+                } else if white_result.unwrap().is_none() || black_result.unwrap().is_none() {
+                    IgnoreTreeMatchHint::WildcardAllMatch
                 } else {
                     IgnoreTreeMatchHint::Sub
                 }
@@ -566,7 +637,7 @@ mod tests {
         tree_pattern.add_path("!test/test*");
         assert!(tree_pattern.match_pattern("test/tewews/fsdfsdd3.jpg"));
         assert!(!tree_pattern.match_pattern("test/testa"));
-        assert!(tree_pattern.match_pattern("test/test/fdsdds.jpg"));
+        assert!(tree_pattern.match_pattern("test/terwe/fdsdds.jpg"));
     }
 
     #[test]

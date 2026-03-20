@@ -131,11 +131,154 @@ impl RepoFilter {
                                 ignore,
                             ));
                         }
+                        tree::IgnoreTreeMatchHint::WildcardAllMatch => {
+                            // wildcard detected, check each subdirectory
+                            match Self::process_traverse(prefix.as_ref(), entry.as_path(), ignore) {
+                                None => result.push(
+                                    prefix
+                                        .as_ref()
+                                        .join(entry)
+                                        .to_str()
+                                        .expect("illegal UTF-8 code")
+                                        .to_string(),
+                                ),
+                                Some(mut list) => result.append(&mut list),
+                            };
+                        }
                     }
                 }
             }
         }
         result
+    }
+
+    fn process_traverse<P, T>(prefix: P, target: T, ignore: &IgnoreTreeNode) -> Option<Vec<String>>
+    where
+        P: AsRef<Path>,
+        T: AsRef<Path>,
+    {
+        let real_target = prefix.as_ref().join(target.as_ref());
+        if real_target.is_file() {
+            if ignore.match_pattern(
+                target
+                    .as_ref()
+                    .as_os_str()
+                    .to_str()
+                    .expect("illegal UTF-8 code")
+                    .replace("\\", "/"),
+            ) {
+                return Some(vec![]);
+            } else {
+                return None;
+            }
+        }
+        let mut pending_dir_filter = vec![];
+        if ignore.match_pattern(
+            target
+                .as_ref()
+                .as_os_str()
+                .to_str()
+                .expect("illegal UTF-8 code")
+                .replace("\\", "/"),
+        ) {
+            pending_dir_filter.push(
+                real_target
+                    .as_os_str()
+                    .to_str()
+                    .expect("illegal UTF-8 code")
+                    .to_string(),
+            );
+        }
+        let dir_iter = fs::read_dir(real_target.clone());
+        match dir_iter {
+            Err(_) => None,
+            Ok(entries) => match entries.fold(None, |cur: Option<Vec<String>>, e| match e {
+                Err(_) => cur,
+                Ok(entry) => {
+                    let path = target.as_ref().join(entry.file_name());
+                    let real_path = real_target.join(entry.file_name());
+                    let mut pending_filter_result = vec![];
+                    let mut pending_selected_result = vec![];
+                    if real_path.is_file() {
+                        if ignore.match_pattern(
+                            path.as_os_str()
+                                .to_str()
+                                .expect("illegal UTF-8 code")
+                                .replace("\\", "/"),
+                        ) {
+                            pending_filter_result.push(
+                                real_path
+                                    .as_os_str()
+                                    .to_str()
+                                    .expect("illegal UTF-8 code")
+                                    .to_string(),
+                            );
+                        } else {
+                            pending_selected_result.push(
+                                real_path
+                                    .as_os_str()
+                                    .to_str()
+                                    .expect("illegal UTF-8 code")
+                                    .to_string(),
+                            );
+                        }
+                    } else {
+                        match Self::process_traverse(prefix.as_ref(), path, ignore) {
+                            Some(mut list) => {
+                                pending_selected_result.append(&mut list);
+                                pending_filter_result.push(
+                                    real_path
+                                        .as_os_str()
+                                        .to_str()
+                                        .expect("illegal UTF-8 code")
+                                        .to_string(),
+                                );
+                            }
+                            None => pending_selected_result.push(
+                                real_path
+                                    .as_os_str()
+                                    .to_str()
+                                    .expect("illegal UTF-8 code")
+                                    .to_string(),
+                            ),
+                        }
+                    }
+                    if pending_filter_result.is_empty() {
+                        match cur {
+                            None => None,
+                            Some(mut list) => {
+                                list.push(
+                                    real_path
+                                        .as_os_str()
+                                        .to_str()
+                                        .expect("illegal UTF-8 code")
+                                        .to_string(),
+                                );
+                                Some(list)
+                            }
+                        }
+                    } else {
+                        match cur {
+                            None => Some(pending_selected_result),
+                            Some(mut list) => {
+                                list.append(&mut pending_selected_result);
+                                Some(list)
+                            }
+                        }
+                    }
+                }
+            }) {
+                None => {
+                    if pending_dir_filter.is_empty() {
+                        None
+                    } else {
+                        Some(vec![])
+                    }
+                }
+
+                Some(list) => Some(list),
+            },
+        }
     }
 }
 
