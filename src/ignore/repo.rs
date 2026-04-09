@@ -33,44 +33,78 @@ impl RepoFilter {
             filelist: list,
         })
     }
-
+    // keep Option<_> only for compatibility
     fn filter<P>(target: P) -> Option<Vec<String>>
     where
         P: AsRef<Path>,
     {
-        if fs::exists(target.as_ref().join(".gitignore")).is_ok_and(|x| x)
-            || fs::exists(target.as_ref().join(".git")).is_ok_and(|x| x)
-        {
-            return Some(Self::process_gitignore(target));
+        match Self::filter0(target.as_ref(), "") {
+            None => Some(vec![target.as_ref().to_string_lossy().to_string()]),
+            Some(list) => Some(list),
         }
-        let mut result = vec![];
-        for entry in fs::read_dir(target.as_ref()).ok()? {
-            match entry {
-                Err(_) => continue,
-                Ok(entry) => {
-                    let entry = target.as_ref().join(entry.file_name());
-                    if entry.is_file() {
-                        result.push(
-                            entry
-                                .as_os_str()
-                                .to_str()
-                                .expect("illegal UTF-8 code")
-                                .to_string(),
-                        );
-                    } else {
-                        result.append(
-                            &mut Self::filter(
-                                target
-                                    .as_ref()
-                                    .join(entry.file_name().expect("unexpected relative path")),
-                            )
-                            .unwrap_or(vec![]),
-                        );
+    }
+
+    fn filter0<P, T>(prefix: P, target: T) -> Option<Vec<String>>
+    where
+        P: AsRef<Path>,
+        T: AsRef<Path>,
+    {
+        let real_target = prefix.as_ref().join(target.as_ref());
+        if fs::exists(real_target.join(".gitignore")).is_ok_and(|x| x)
+            || fs::exists(real_target.join(".git")).is_ok_and(|x| x)
+        {
+            return Some(Self::process_gitignore(real_target));
+        }
+        let entries = fs::read_dir(real_target.as_path()).ok();
+        match entries {
+            None => Some(vec![]),
+            Some(entries) => {
+                let mut filtered = false;
+                let mut pending_selected_dir = vec![];
+                for entry in entries {
+                    match entry {
+                        Err(e) => {
+                            println!("{}", e);
+                            filtered = true;
+                            continue;
+                        }
+                        Ok(entry) => {
+                            let real_entry = real_target.join(entry.file_name());
+                            let entry = target.as_ref().join(entry.file_name());
+                            if real_entry.is_file() {
+                                pending_selected_dir.push(
+                                    real_entry
+                                        .as_os_str()
+                                        .to_str()
+                                        .expect("illegal UTF-8 code")
+                                        .to_string(),
+                                );
+                            } else {
+                                let sub_result = Self::filter0(prefix.as_ref(), entry);
+                                match sub_result {
+                                    None => pending_selected_dir.push(
+                                        real_entry
+                                            .as_os_str()
+                                            .to_str()
+                                            .expect("illegal UTF-8 code")
+                                            .to_string(),
+                                    ),
+                                    Some(mut list) => {
+                                        pending_selected_dir.append(&mut list);
+                                        filtered = true;
+                                    }
+                                };
+                            }
+                        }
                     }
+                }
+                if filtered {
+                    Some(pending_selected_dir)
+                } else {
+                    None
                 }
             }
         }
-        Some(result)
     }
 
     fn process_gitignore<P>(target: P) -> Vec<String>
@@ -355,6 +389,33 @@ mod tests {
             !filter
                 .filelist()
                 .contains(&root.join("debug.log").to_string_lossy().to_string())
+        );
+    }
+
+    #[test]
+    fn test_merge_dir() {
+        let temp_dir = tempdir().expect("failed to create tmp dir");
+        let root = temp_dir.path();
+
+        fs::create_dir(root.join("normal")).unwrap();
+        fs::create_dir(root.join("normal").join("dir")).unwrap();
+        File::create(root.join("normal").join("file")).unwrap();
+        fs::create_dir(root.join("normal").join("dir").join("empty")).unwrap();
+        fs::create_dir(root.join("normal").join("dir").join("internal")).unwrap();
+        File::create(
+            root.join("normal")
+                .join("dir")
+                .join("internal")
+                .join("regular"),
+        )
+        .unwrap();
+
+        let filter = RepoFilter::new(root).expect("should create filter");
+        assert_eq!(filter.filelist().len(), 1);
+        assert!(
+            filter
+                .filelist()
+                .contains(&root.to_string_lossy().to_string())
         );
     }
 }
